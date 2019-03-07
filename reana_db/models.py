@@ -62,6 +62,7 @@ class WorkflowStatus(enum.Enum):
     failed = 3
     deleted = 4
     stopped = 5
+    queued = 6
 
 
 class Workflow(Base, Timestamp):
@@ -78,6 +79,7 @@ class Workflow(Base, Timestamp):
     input_parameters = Column(JSONType)
     operational_options = Column(JSONType)
     type_ = Column(String(30))
+    interactive_session = Column(Text)
     logs = Column(String)
     run_started_at = Column(DateTime)
     run_finished_at = Column(DateTime)
@@ -101,6 +103,7 @@ class Workflow(Base, Timestamp):
                  reana_specification,
                  type_,
                  logs='',
+                 interactive_session=None,
                  input_parameters={},
                  operational_options={},
                  status=WorkflowStatus.created):
@@ -114,6 +117,7 @@ class Workflow(Base, Timestamp):
         self.operational_options = operational_options
         self.type_ = type_
         self.logs = logs or ''
+        self.interactive_session = interactive_session
         from .database import Session
         last_workflow = Session.query(Workflow).filter_by(
             name=name,
@@ -143,16 +147,23 @@ class Workflow(Base, Timestamp):
         """Return workflow specification."""
         return self.reana_specification['workflow'].get('specification', {})
 
+    def get_owner_access_token(self):
+        """Return workflow owner access token."""
+        from .database import Session
+        db_session = Session.object_session(self)
+        owner = db_session.query(User).filter_by(
+            id_=self.owner_id).first()
+        return owner.access_token
+
     @staticmethod
     def update_workflow_status(db_session, workflow_uuid, status,
-                               new_logs, message=None):
+                               new_logs='', message=None):
         """Update database workflow status.
 
         :param workflow_uuid: UUID which represents the workflow.
         :param status: String that represents the workflow status.
-        :param status_message: String that represents the message
-           related with the
-           status, if there is any.
+        :param new_logs: New logs from workflow execution.
+        :param message: Unused.
         """
         try:
             workflow = \
@@ -163,7 +174,8 @@ class Workflow(Base, Timestamp):
                                 format(workflow_uuid))
             if status:
                 workflow.status = status
-            workflow.logs = (workflow.logs or "") + new_logs
+            if new_logs:
+                workflow.logs = (workflow.logs or '') + new_logs + '\n'
             db_session.commit()
         except Exception as e:
             raise e
@@ -179,18 +191,18 @@ class Job(Base, Timestamp):
     workflow_uuid = Column(UUIDType)
     status = Column(String(30))
     job_type = Column(String(30))
-    cvmfs_mounts = Column(String(256))
+    cvmfs_mounts = Column(Text)
     shared_file_system = Column(Boolean)
     docker_img = Column(String(256))
     experiment = Column(String(256))
     cmd = Column(Text)
-    env_vars = Column(String(10000))
+    env_vars = Column(Text)
     restart_count = Column(Integer)
     max_restart_count = Column(Integer)
     deleted = Column(Boolean)
     logs = Column(String, nullable=True)
     prettified_cmd = Column(Text)
-    name = Column(String(256))
+    name = Column(Text)
 
 
 class JobCache(Base, Timestamp):
